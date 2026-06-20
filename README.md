@@ -1,9 +1,6 @@
-# LDP-FL with CSS
+# Balancing Privacy and Accuracy in Federated Learning for Speech Emotion Recognition
 
-Implementation of **Balancing Privacy and Accuracy in Federated Learning for
-Speech Emotion Recognition** (FedCSIS 2023).
-
-📄 Paper: [IEEE Xplore](https://ieeexplore.ieee.org/document/10306049)
+📄 Paper: [FedCSIS 2023](https://ieeexplore.ieee.org/document/10306049)
 
 Local Differential Privacy (LDP) protects clients' speech data in federated SER
 by adding noise to model parameters before they leave the device, but that noise
@@ -20,8 +17,7 @@ more resilient to inversion than the non-LDP baseline.
 
 - **LDP (DP-SGD)** — each client clips per-sample gradients to L2 norm `C`,
   averages them, and adds Gaussian noise `N(0, σ²C²I)` before sharing; the server
-  runs FedSGD `g̃ = (1/K) Σ g̃_i`, `W ← W − η g̃`. Cumulative privacy `ε` per
-  client is tracked with the **Moments Accountant**.
+  runs FedSGD. Cumulative privacy `ε` per client is tracked with the **Moments Accountant**.
 - **CSS (Client Selection Strategy)** — each round picks `K` clients: the top
   `K/2` by local sample size (more data → more representative, noise-robust
   updates) plus `K/2` chosen at random (diversity, no overlap). The `random`
@@ -58,13 +54,14 @@ The model inversion attack is exposed as `invert(model, target_label)` in
 
 ```bibtex
 @inproceedings{mohammadi2023balancing,
-  title={Balancing Privacy and Accuracy in Federated Learning for Speech Emotion Recognition},
+  title={Balancing privacy and accuracy in federated learning for speech emotion recognition},
   author={Mohammadi, Samaneh and Mohammadi, Mohammadreza and Sinaei, Sima and Balador, Ali and Nowroozi, Ehsan and Flammini, Francesco and Conti, Mauro},
   booktitle={2023 18th Conference on Computer Science and Intelligence Systems (FedCSIS)},
   pages={191--199},
   year={2023},
   organization={IEEE}
 }
+
 ```
 
 ## License
