@@ -1,9 +1,3 @@
-"""
-SER model: a small MLP, exactly as in the paper - two dense layers [256, 128]
-with ReLU and 0.2 dropout, then a 4-way classifier over the 988-dim OpenSMILE
-emobase features. Outputs log-softmax (paired with NLL loss).
-"""
-
 import torch
 import torch.nn as nn
 
