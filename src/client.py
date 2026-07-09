@@ -1,22 +1,3 @@
-"""
-Client side of LDP-FL (Algorithm 1, lines 6-11).
-
-Each selected client runs DP-SGD over its local data and sends only the noisy
-gradient to the server. Per local batch:
-
-  1. true per-sample gradients (via torch.func, so clipping is exactly per-sample)
-  2. clip each sample to L2 norm C
-  3. sum, add Gaussian noise N(0, sigma^2 C^2 I), divide by the batch size
-
-A round does one pass over the local data, so a client with more data runs more
-noisy batch steps -> it spends more of its privacy budget per round. Each client
-keeps its OWN Moments Accountant, so the cumulative epsilon reflects how much
-that specific client actually participated (which CSS makes unequal).
-
-The client never sends raw data or an un-noised gradient. It does, however,
-report its dataset size to the server so CSS can rank clients (see report_size).
-"""
-
 import torch
 import torch.nn.functional as F
 from torch.func import functional_call, vmap, grad
