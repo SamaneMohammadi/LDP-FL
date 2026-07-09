@@ -12,20 +12,7 @@ def _gauss_log_pdf(x, mean, sigma):
 
 
 def _step_log_moment(q, sigma, lmbd):
-    """Log moment of one sub-sampled Gaussian step, for moment order lmbd.
 
-    mu0 ~ N(0, sigma^2) is the "data absent" distribution; the mechanism output
-    mixes mu0 and mu1 ~ N(1, sigma^2) with weight q. We take the larger of the
-    two directional moments, as in the original accountant. Everything is done
-    in log-space to stay stable in the tails (otherwise (mix/mu0)^lambda
-    overflows for large lambda).
-
-    Integration window: the second integrand, mix*(mix/mu0)^lmbd, peaks at
-    z ~= 1 + lmbd (its log-derivative is (1 + lmbd - z)/sigma^2), so the upper
-    limit MUST grow with lmbd or the peak is truncated and the moment is
-    under-estimated. We extend to 1 + lmbd + 12*sigma and pick the grid spacing
-    fine enough (<= sigma/30) to resolve the ~sigma-wide peak.
-    """
     lo = -1.0 - 12.0 * sigma
     hi = 1.0 + lmbd + 12.0 * sigma
     grid_points = max(40000, int(30.0 * (hi - lo) / sigma))
@@ -45,15 +32,6 @@ def _step_log_moment(q, sigma, lmbd):
 
 
 class MomentsAccountant:
-    """Tracks cumulative log moments for one client across rounds.
-
-    We minimise epsilon over a grid of moment orders lambda. The orders must
-    include FRACTIONAL values below 1, not just integers: in the regime this
-    paper runs in (q ~= 0.136, sigma as small as 0.5) the tightest bound is
-    achieved at a small fractional order, and an integer-only grid would
-    noticeably over-estimate epsilon. The grid below mirrors the orders used by
-    Opacus' RDP accountant (expressed here as lambda = alpha - 1).
-    """
 
     def __init__(self, sigma, delta, orders=None):
         self.sigma = sigma
@@ -65,15 +43,10 @@ class MomentsAccountant:
         self._log_moments = np.zeros(len(self.orders))  # cumulative mu(lambda)
 
     def step(self, q, num_steps=1):
-        """Account for `num_steps` DP-SGD updates with sampling rate q."""
         for i, lmbd in enumerate(self.orders):
             self._log_moments[i] += num_steps * _step_log_moment(q, self.sigma, lmbd)
 
     def get_epsilon(self):
-        """Current cumulative epsilon at the fixed delta.
-
-        epsilon = min_lambda ( mu(lambda) - log(delta) ) / lambda
-        """
         eps = [
             (m - math.log(self.delta)) / lmbd
             for m, lmbd in zip(self._log_moments, self.orders)
