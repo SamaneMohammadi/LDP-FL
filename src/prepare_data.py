@@ -1,20 +1,3 @@
-"""
-Turn the raw CREMA-D wavs into OpenSMILE emobase features and split them by
-speaker, one client per speaker.
-
-Follows the paper (Section 4.1):
-  - CREMA-D, four emotions: neutral, sad, happy, angry
-  - features: OpenSMILE emobase set (988-dim per clip)
-  - each of the 91 speakers is a separate client
-  - 80/20 train/val split per client
-
-CREMA-D filenames look like  1001_DFA_ANG_XX.wav :
-  field 0 = speaker id (1001..1091)   field 2 = emotion code (ANG/HAP/NEU/SAD)
-
-Usage:
-    python prepare_data.py --data_path ./CREMA-D/AudioWAV --out_dir ./client_data
-"""
-
 import os
 import glob
 import argparse
