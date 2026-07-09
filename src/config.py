@@ -1,8 +1,3 @@
-"""
-All settings for LDP-FL with CSS, following the paper
-(Section "Usecase Description and Simulation Setting").
-"""
-
 # --- Federated setup ---------------------------------------------------------
 NUM_CLIENTS = 91            # one client per CREMA-D speaker
 CLIENTS_PER_ROUND = 50     # K selected each round (the paper uses 50; 7 for the attack study)
