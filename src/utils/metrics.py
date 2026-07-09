@@ -1,8 +1,3 @@
-"""
-Evaluation metrics: accuracy, macro-F1, precision, loss - the ones reported in
-the paper's performance table.
-"""
-
 import numpy as np
 import torch
 from sklearn.metrics import accuracy_score, f1_score, precision_score
