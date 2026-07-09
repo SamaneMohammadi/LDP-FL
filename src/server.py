@@ -1,15 +1,3 @@
-"""
-Server side of LDP-FL (Algorithm 1, lines 13-14).
-
-The server averages the noisy client gradients (FedSGD) and steps the global
-model:
-
-    g_tilde = (1/K) sum_i g_tilde_i
-    w_{t+1} = w_t - eta * g_tilde
-
-It only ever sees noisy gradients, never raw data or clean updates.
-"""
-
 import torch
 
 
