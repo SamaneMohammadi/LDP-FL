@@ -1,18 +1,3 @@
-"""
-LDP-FL with CSS (Algorithm 1 + Algorithm 2).
-
-Each round:
-  - CSS picks K clients (half largest by data size, half random)
-  - each selected client computes a clipped + noised local gradient (LDP)
-  - the server averages them and steps the global model (FedSGD)
-
-Privacy (epsilon) for a given noise scale is reported with the Moments
-Accountant at the end.
-
-    python main.py --selection css    --sigma 3 --clip 2 --rounds 200
-    python main.py --selection random --sigma 3 --clip 2 --rounds 200   # baseline
-"""
-
 import argparse
 import random
 
