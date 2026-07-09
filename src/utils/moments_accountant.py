@@ -1,26 +1,5 @@
 """
 Moments Accountant for the sampled Gaussian mechanism (Abadi et al., 2016).
-
-The paper tracks cumulative privacy loss with the Moments Accountant rather than
-plain composition, because it gives much tighter (epsilon, delta) bounds under
-the kind of repeated, sub-sampled Gaussian noise that DP-SGD produces. Opacus
-ships an RDP accountant but does not expose the log-moment formulation directly,
-so this is a small standalone implementation.
-
-For each step we compute the log moment
-
-    mu_step(lambda) = log E[ (M(D)/M(D'))^lambda ]
-
-of the sub-sampled Gaussian mechanism with sampling rate q and noise multiplier
-sigma. Moments compose additively, so after T steps
-
-    mu(lambda) = T * mu_step(lambda)
-
-and the privacy budget is
-
-    epsilon = min_lambda ( mu(lambda) - log(delta) ) / lambda      (delta fixed).
-
-This matches Eq. (Moments Accountant) and Section III "Privacy Loss Accounting".
 """
 
 import math
