@@ -1,23 +1,3 @@
-"""
-Model inversion attack for SER (Algorithm 3), adapted from Fredrikson et al.
-(2015) from faces to speech features.
-
-The adversary knows a target emotion label and has access to a client's model.
-It starts from a blank feature vector and runs gradient descent on the *input*
-to make the model as confident as possible in the target label, i.e. it
-minimizes
-
-    c(x) = 1 - f_label(x)
-
-where f_label(x) is the model's predicted probability for the target emotion.
-The reconstructed x is the attacker's guess at that client's speech features.
-
-We then score the attack with the MSE between the reconstruction and the
-client's real features. Under LDP the model is noisy, so the reconstruction is
-poor and the MSE blows up - that large MSE is exactly the privacy protection the
-paper reports in its attack table.
-"""
-
 import torch
 import torch.nn.functional as F
 
