@@ -3,6 +3,8 @@ Moments Accountant for the sampled Gaussian mechanism (Abadi et al., 2016).
 """
 
 import math
+from functools import lru_cache
+
 import numpy as np
 from scipy.special import logsumexp
 
@@ -31,6 +33,12 @@ def _step_log_moment(q, sigma, lmbd):
     return max(log_i0, log_i1)
 
 
+@lru_cache(maxsize=None)
+def _step_log_moments(q, sigma, orders):
+    # depends only on (q, sigma), so cache it instead of re-integrating every step
+    return np.array([_step_log_moment(q, sigma, lmbd) for lmbd in orders])
+
+
 class MomentsAccountant:
 
     def __init__(self, sigma, delta, orders=None):
@@ -39,12 +47,11 @@ class MomentsAccountant:
         if orders is None:
             # lambda = alpha - 1, with alpha from 1.1..9.9 (step 0.1) then 11..63
             orders = [round(0.1 * x, 4) for x in range(1, 99)] + list(range(10, 63))
-        self.orders = orders
+        self.orders = tuple(orders)
         self._log_moments = np.zeros(len(self.orders))  # cumulative mu(lambda)
 
     def step(self, q, num_steps=1):
-        for i, lmbd in enumerate(self.orders):
-            self._log_moments[i] += num_steps * _step_log_moment(q, self.sigma, lmbd)
+        self._log_moments += num_steps * _step_log_moments(q, self.sigma, self.orders)
 
     def get_epsilon(self):
         eps = [

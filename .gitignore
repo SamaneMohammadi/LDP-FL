@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+src/client_data/
+src/results/
+src/features_emobase.npz
+src/client_data_skewed/
+src/sweep_data/
