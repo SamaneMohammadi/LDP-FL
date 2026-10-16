@@ -7,7 +7,7 @@ import config
 def invert(model, target_label, input_dim=config.INPUT_DIM,
            iters=config.ATTACK_ITERS, lr=config.ATTACK_LR,
            patience=config.ATTACK_PATIENCE, gamma=config.ATTACK_GAMMA,
-           device="cpu"):
+           device="cpu", clamp=True):
     """Reconstruct the input features that maximize the target label.
 
     Returns (best_x, best_cost).
@@ -29,7 +29,7 @@ def invert(model, target_label, input_dim=config.INPUT_DIM,
             best_cost, best_x = c.item(), x.detach().clone()
 
         # stop if no improvement over the last `patience` steps
-        if len(history) > patience and c.item() >= max(history[-patience:]):
+        if len(history) > patience and c.item() >= max(history[-patience - 1:-1]):
             break
         # stop if the cost is already past the threshold
         if c.item() <= 1 - gamma:
@@ -37,7 +37,9 @@ def invert(model, target_label, input_dim=config.INPUT_DIM,
 
         g, = torch.autograd.grad(c, x)
         with torch.no_grad():
-            x = (x - lr * g).clamp(0, 1)   # Process(): keep features in [0,1]
+            x = x - lr * g
+            if clamp:
+                x = x.clamp(0, 1)   # Process(): keep features in [0,1]
         x.requires_grad_(True)
 
     return best_x, best_cost
