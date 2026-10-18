@@ -17,7 +17,7 @@ import torch
 import config
 from attack import invert
 from client import Client, set_weights
-from dataset import _load
+from dataset import _load, count_clients
 from main import get_weights
 from model import build_model
 from server import Server
@@ -34,7 +34,7 @@ def run(sigma, clip, no_dp, args):
     server = Server()
     clients = [Client(cid, global_model, sigma=sigma, delta=args.delta,
                       data_dir=args.data_dir, dp=not no_dp)
-               for cid in range(config.NUM_CLIENTS)]
+               for cid in range(count_clients(args.data_dir))]
     sizes = [c.report_size() for c in clients]
 
     for rnd in range(1, args.rounds + 1):

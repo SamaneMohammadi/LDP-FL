@@ -5,3 +5,6 @@ src/results/
 src/features_emobase.npz
 src/client_data_skewed/
 src/sweep_data/
+src/client_data_spkskew/
+src/folds_skewed/
+src/folds_speaker/

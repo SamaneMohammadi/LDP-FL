@@ -15,28 +15,37 @@ def set_weights(model, weights):
 
 class Client:
     def __init__(self, cid, model, sigma, delta, data_dir="client_data", device="cpu", dp=True,
-                 lot_frac=None):
+                 lot_frac=None, local_epoch=False, privacy_unit="record"):
         self.cid = cid
         self.model = model
         self.device = device
         self.sigma = sigma
         self.dp = dp
+        self.privacy_unit = privacy_unit
         self.train_loader, self.val_loader, self.n_train = get_loaders(
             cid, data_dir=data_dir, batch_size=config.BATCH_SIZE
         )
-        # this client's own privacy ledger. Each local step Poisson-samples a lot
-        # with rate q, and a round runs 1/q steps (one pass over the data in
-        # expectation) -- exactly what the accountant assumes. By default the
+        # this client's own privacy ledger. Each noisy step Poisson-samples a lot
+        # with rate q -- exactly what the accountant assumes. By default the
         # expected lot is B samples (q = B/n, so q depends on the client's size);
         # with lot_frac every client uses the same q = lot_frac (lot = lot_frac * n).
+        # Per round a selected client takes ONE noisy step (paper Algorithm 1,
+        # FedSGD); with local_epoch it takes 1/q steps (one pass in expectation).
         self.accountant = MomentsAccountant(sigma=sigma, delta=delta)
         if lot_frac is None:
             self.q = min(1.0, config.BATCH_SIZE / max(self.n_train, 1))
-            self.steps_per_round = max(1, round(self.n_train / config.BATCH_SIZE))
+            epoch_steps = max(1, round(self.n_train / config.BATCH_SIZE))
         else:
             self.q = lot_frac
-            self.steps_per_round = max(1, round(1.0 / lot_frac))
+            epoch_steps = max(1, round(1.0 / lot_frac))
+        self.steps_per_round = epoch_steps if local_epoch else 1
         self.lot_size = self.q * self.n_train
+        # Privacy unit. "record": protects one recording; each step is a Gaussian
+        # release sub-sampled at rate q. "client": protects the client's whole
+        # dataset (the speaker); every step touches that dataset, so there is no
+        # sub-sampling amplification (accounting rate 1) and each extra local step
+        # costs privacy -- clients running more steps per round spend more.
+        self.acct_q = self.q if privacy_unit == "record" else 1.0
         self.x_train = self.train_loader.dataset.x.to(device)
         self.y_train = self.train_loader.dataset.y.to(device)
         self.rounds_participated = 0
@@ -86,6 +95,19 @@ class Client:
             out.append((summed + noise) / self.lot_size)
         return out
 
+    def _noisy_client_grad(self, clip):
+        """One client-level DP step: sample a minibatch, clip the client's whole
+        batch gradient to C (sensitivity C w.r.t. the entire client dataset) and
+        add N(0, sigma^2 C^2 I)."""
+        mask = torch.rand(self.n_train, device=self.device) < self.q
+        if not mask.any():
+            mask[torch.randint(self.n_train, (1,))] = True
+        g = self._batch_grad(self.x_train[mask], self.y_train[mask])
+        norm = torch.sqrt(sum((gi ** 2).sum() for gi in g))
+        scale = (clip / norm.clamp(min=1e-12)).clamp(max=1.0)
+        return [gi * scale + torch.normal(0.0, self.sigma * clip, size=gi.shape, device=self.device)
+                for gi in g]
+
     def noisy_gradient(self, global_weights, clip, rnd=None):
         """DP-SGD over the local data; returns the round's noisy gradient.
 
@@ -96,12 +118,20 @@ class Client:
         self.model.train()
 
         if self.dp:
-            steps = [self._noisy_lot_grad(clip) for _ in range(self.steps_per_round)]
-            # account: each step was one sub-sampled Gaussian release at rate q
-            self.accountant.step(q=self.q, num_steps=self.steps_per_round)
+            step_fn = self._noisy_lot_grad if self.privacy_unit == "record" else self._noisy_client_grad
+            steps = [step_fn(clip) for _ in range(self.steps_per_round)]
+            # account: each step is one Gaussian release (sub-sampled at rate
+            # acct_q for record-level privacy, not sub-sampled for client-level)
+            self.accountant.step(q=self.acct_q, num_steps=self.steps_per_round)
         else:
-            steps = [self._batch_grad(x.to(self.device), y.to(self.device))
-                     for x, y in self.train_loader]
+            # non-LDP baseline: the same steps on the same lot sizes, without
+            # clipping or noise
+            steps = []
+            for _ in range(self.steps_per_round):
+                mask = torch.rand(self.n_train, device=self.device) < self.q
+                if not mask.any():
+                    mask[torch.randint(self.n_train, (1,))] = True
+                steps.append(self._batch_grad(self.x_train[mask], self.y_train[mask]))
         self.rounds_participated += 1
         if self.dp:
             self.eps_history.append((rnd, self.epsilon()))
