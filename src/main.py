@@ -12,7 +12,7 @@ from client import Client, set_weights
 from server import Server
 from utils.css import select
 from utils.metrics import evaluate
-from dataset import FeatureDataset
+from dataset import FeatureDataset, count_clients, get_test_loader
 from torch.utils.data import DataLoader
 import os
 
@@ -48,10 +48,22 @@ def main():
     parser.add_argument("--lot_frac", type=float, default=None,
                         help="same sampling rate q for every client (lot = lot_frac * n); "
                              "default: lot of B samples, q = B/n")
+    parser.add_argument("--lr", type=float, default=config.LEARNING_RATE,
+                        help="server learning rate eta of the FedSGD update")
+    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE,
+                        help="expected local minibatch size B")
+    parser.add_argument("--local_epoch", action="store_true",
+                        help="each selected client runs one local epoch of noisy steps per "
+                             "round instead of the single FedSGD step of Algorithm 1")
+    parser.add_argument("--privacy_unit", choices=["record", "client"], default="record",
+                        help="record: protect one recording (per-sample clipping); client: "
+                             "protect a client's whole dataset (clip each local step's "
+                             "batch gradient), so more local steps cost more privacy")
     parser.add_argument("--out_dir", default="results",
                         help="where the per-client epsilon CSVs are written")
     args = parser.parse_args()
 
+    config.BATCH_SIZE = args.batch_size
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -59,19 +71,27 @@ def main():
     device = "cpu"
 
     global_model = build_model().to(device)
-    val_loader = build_global_val_loader(args.data_dir, config.NUM_CLIENTS)
+    num_clients = count_clients(args.data_dir)
+    val_loader = build_global_val_loader(args.data_dir, num_clients)
+    # accuracy is reported on held-out test speakers when the data has them
+    # (prepare_data.py --folds); otherwise on the clients' pooled validation split
+    test_loader = get_test_loader(args.data_dir)
     server = Server()
 
     clients = [Client(cid, global_model, sigma=args.sigma, delta=args.delta,
                       data_dir=args.data_dir, device=device, dp=not args.no_dp,
-                      lot_frac=args.lot_frac)
-               for cid in range(config.NUM_CLIENTS)]
+                      lot_frac=args.lot_frac, local_epoch=args.local_epoch,
+                      privacy_unit=args.privacy_unit)
+               for cid in range(num_clients)]
     # clients disclose their dataset size to the server so CSS can rank them
     client_sizes = [c.report_size() for c in clients]
 
     mode = "non-LDP FL" if args.no_dp else "LDP-FL"
     print(f"{mode} | selection={args.selection} sigma={args.sigma} C={args.clip} "
-          f"delta={args.delta} K={args.clients_per_round}")
+          f"delta={args.delta} K={args.clients_per_round} B={args.batch_size} "
+          f"privacy_unit={args.privacy_unit} local_epoch={args.local_epoch} | "
+          f"{num_clients} clients, evaluated on "
+          f"{'held-out test speakers' if test_loader else 'pooled validation split'}")
 
     history = []
     for rnd in range(1, args.rounds + 1):
@@ -79,14 +99,15 @@ def main():
         chosen = select(client_sizes, args.clients_per_round, args.selection, rng)
 
         grads = [clients[i].noisy_gradient(weights, args.clip, rnd) for i in chosen]
-        new_weights = server.aggregate_and_update(weights, grads, config.LEARNING_RATE)
+        new_weights = server.aggregate_and_update(weights, grads, args.lr)
         set_weights(global_model, new_weights)
 
         if rnd % args.eval_every == 0 or rnd == args.rounds:
-            m = evaluate(global_model, val_loader, device)
-            history.append({"round": rnd, **m})
-            line = (f"round {rnd:3d} | acc {m['acc']:.4f} f1 {m['f1']:.4f} "
-                    f"prec {m['precision']:.4f} loss {m['loss']:.4f}")
+            v = evaluate(global_model, val_loader, device)
+            m = evaluate(global_model, test_loader, device) if test_loader else v
+            history.append({"round": rnd, **m, "val_acc": v["acc"]})
+            line = (f"round {rnd:3d} | {'test' if test_loader else 'val'} acc {m['acc']:.4f} "
+                    f"f1 {m['f1']:.4f} prec {m['precision']:.4f} loss {m['loss']:.4f}")
             if not args.no_dp:
                 # the LDP guarantee must hold for every client -> worst case
                 eps_max = max((c.epsilon() for c in clients if c.rounds_participated), default=0.0)
@@ -94,6 +115,7 @@ def main():
             print(line, flush=True)
 
     summary = {"args": vars(args), "history": history, "final": history[-1],
+               "evaluated_on": "test" if test_loader else "val",
                # mean of the last three evaluations, less sensitive to one noisy round
                "acc_last3": float(np.mean([h["acc"] for h in history[-3:]]))}
     if not args.no_dp:
@@ -109,12 +131,13 @@ def report_privacy(clients, args):
     size (q = B/n, n/B steps per round) and on how often it was selected, so
     under CSS the large clients spend far more. The system-level (eps, delta)-LDP
     guarantee is the worst case over clients, not an average or a single client."""
-    rows = [(c.cid, c.n_train, c.q, c.steps_per_round, c.rounds_participated,
+    rows = [(c.cid, c.n_train, c.acct_q, c.steps_per_round, c.rounds_participated,
              c.epsilon() if c.rounds_participated else 0.0) for c in clients]
     eps_vals = sorted(r[5] for r in rows)
     part = [r for r in rows if r[4] > 0]
 
-    print(f"\nper-client privacy (delta={args.delta}, {len(part)}/{len(rows)} clients participated):")
+    print(f"\nper-client {args.privacy_unit}-level privacy (delta={args.delta}, "
+          f"{len(part)}/{len(rows)} clients participated):")
     print(f"  system guarantee: ({eps_vals[-1]:.2f}, {args.delta})-LDP  [worst-case client]")
     print(f"  epsilon over clients: min {eps_vals[0]:.2f}  median {eps_vals[len(eps_vals) // 2]:.2f}  "
           f"max {eps_vals[-1]:.2f}")

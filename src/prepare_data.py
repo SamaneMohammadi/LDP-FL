@@ -40,6 +40,17 @@ def speaker_partition(speakers, rng):
     return parts
 
 
+def speaker_skewed_partition(speakers, keep_min, rng):
+    """One client per speaker, but each speaker keeps a random share of its
+    recordings, log-uniform in [keep_min, 1], so client sizes differ clearly
+    while every client is still a single speaker."""
+    parts = []
+    for idx in speaker_partition(speakers, rng):
+        frac = np.exp(rng.uniform(np.log(keep_min), 0.0))
+        parts.append(idx[:max(2, int(round(frac * len(idx))))])
+    return parts
+
+
 def skewed_partition(n_samples, n_clients, beta, min_size, rng):
     """Quantity skew: client sizes ~ min_size + Dirichlet(beta) share of the rest
     (Li et al., 2022). Smaller beta -> more unequal sizes. Samples are assigned
@@ -50,7 +61,33 @@ def skewed_partition(n_samples, n_clients, beta, min_size, rng):
     return np.split(idx, np.cumsum(sizes)[:-1])
 
 
-def save_partitions(feats, labels, parts, out_dir, val_split=config.VAL_SPLIT):
+def speaker_folds(speakers, n_folds, keep_min, rng):
+    """Speaker-independent k-fold split. Speakers are dealt into n_folds groups;
+    in fold f, group f is the held-out test set (all of its recordings) and every
+    other speaker is one FL client. With keep_min, each training speaker keeps a
+    fixed random share of its recordings (log-uniform in [keep_min, 1], drawn once
+    per speaker), so client sizes differ clearly.
+
+    Yields (fold, client_parts, client_speakers, test_idx).
+    """
+    names = sorted(set(speakers))
+    order = rng.permutation(len(names))
+    fold_of = {names[i]: k % n_folds for k, i in enumerate(order)}
+    share = {sp: (np.exp(rng.uniform(np.log(keep_min), 0.0)) if keep_min else 1.0) for sp in names}
+    idx_of = {}
+    for sp in names:
+        idx = np.where(speakers == sp)[0]
+        rng.shuffle(idx)
+        idx_of[sp] = idx
+    for f in range(n_folds):
+        train_spk = [sp for sp in names if fold_of[sp] != f]
+        parts = [idx_of[sp][:max(2, int(round(share[sp] * len(idx_of[sp]))))] for sp in train_spk]
+        test_idx = np.concatenate([idx_of[sp] for sp in names if fold_of[sp] == f])
+        yield f, parts, train_spk, test_idx
+
+
+def save_partitions(feats, labels, parts, out_dir, val_split=config.VAL_SPLIT,
+                    test_idx=None, client_names=None):
     os.makedirs(out_dir, exist_ok=True)
     splits = []
     for idx in parts:
@@ -70,11 +107,21 @@ def save_partitions(feats, labels, parts, out_dir, val_split=config.VAL_SPLIT):
         np.save(os.path.join(out_dir, f"client_{cid}_y_train.npy"), labels[train_idx])
         np.save(os.path.join(out_dir, f"client_{cid}_x_val.npy"), feats[val_idx])
         np.save(os.path.join(out_dir, f"client_{cid}_y_val.npy"), labels[val_idx])
+    if test_idx is not None:
+        # held-out test speakers, normalized with the training statistics only
+        np.save(os.path.join(out_dir, "test_x.npy"), feats[test_idx])
+        np.save(os.path.join(out_dir, "test_y.npy"), labels[test_idx])
+    with open(os.path.join(out_dir, "clients.csv"), "w") as f:
+        f.write("cid,speaker,n_train,n_val\n")
+        for cid, (tr, va) in enumerate(splits):
+            name = client_names[cid] if client_names is not None else cid
+            f.write(f"{cid},{name},{len(tr)},{len(va)}\n")
 
     n_train = sorted(len(tr) for tr, _ in splits)
     print(f"wrote {len(splits)} client partitions to {out_dir}")
     print(f"train samples per client: min {n_train[0]}  median {n_train[len(n_train) // 2]}  "
-          f"max {n_train[-1]}  total {sum(n_train)}")
+          f"max {n_train[-1]}  total {sum(n_train)}"
+          + (f" | test samples {len(test_idx)}" if test_idx is not None else ""))
 
 
 if __name__ == "__main__":
@@ -83,11 +130,17 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", default="client_data")
     parser.add_argument("--features_cache", default="features_emobase.npz",
                         help="raw extracted features are cached here and reused")
-    parser.add_argument("--partition", choices=["speaker", "skewed"], default="speaker")
+    parser.add_argument("--partition", choices=["speaker", "speaker_skewed", "skewed"],
+                        default="speaker")
     parser.add_argument("--beta", type=float, default=0.5,
                         help="Dirichlet concentration for --partition skewed")
+    parser.add_argument("--keep_min", type=float, default=0.15,
+                        help="smallest share of a speaker's recordings kept, --partition speaker_skewed")
     parser.add_argument("--min_size", type=int, default=10,
                         help="minimum samples per client for --partition skewed")
+    parser.add_argument("--folds", type=int, default=0,
+                        help="speaker-independent k-fold split: writes <out_dir>/fold<k>/ with "
+                             "held-out test speakers (use with --partition speaker or speaker_skewed)")
     parser.add_argument("--seed", type=int, default=config.SEED)
     args = parser.parse_args()
 
@@ -103,8 +156,18 @@ if __name__ == "__main__":
     print(f"features: {feats.shape} over {len(set(speakers))} speakers")
 
     rng = np.random.default_rng(args.seed)
+    if args.folds:
+        if args.partition == "skewed":
+            parser.error("--folds keeps one client per speaker; use --partition speaker or speaker_skewed")
+        keep_min = args.keep_min if args.partition == "speaker_skewed" else None
+        for f, parts, names, test_idx in speaker_folds(speakers, args.folds, keep_min, rng):
+            save_partitions(feats, labels, parts, os.path.join(args.out_dir, f"fold{f}"),
+                            test_idx=test_idx, client_names=names)
+        raise SystemExit
     if args.partition == "speaker":
         parts = speaker_partition(speakers, rng)
+    elif args.partition == "speaker_skewed":
+        parts = speaker_skewed_partition(speakers, args.keep_min, rng)
     else:
         parts = skewed_partition(len(feats), config.NUM_CLIENTS, args.beta, args.min_size, rng)
     save_partitions(feats, labels, parts, args.out_dir)

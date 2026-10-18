@@ -34,3 +34,20 @@ def get_loaders(cid, data_dir="client_data", batch_size=config.BATCH_SIZE):
     train = DataLoader(FeatureDataset(x_tr, y_tr), batch_size=batch_size, shuffle=True)
     val = DataLoader(FeatureDataset(x_va, y_va), batch_size=batch_size, shuffle=False)
     return train, val, len(x_tr)
+
+
+def count_clients(data_dir):
+    """Number of clients written by prepare_data.py (client ids are 0..n-1)."""
+    n = 0
+    while os.path.exists(os.path.join(data_dir, f"client_{n}_x_train.npy")):
+        n += 1
+    return n
+
+
+def get_test_loader(data_dir, batch_size=256):
+    """Held-out test set (speakers that never train), or None if there is none."""
+    xp = os.path.join(data_dir, "test_x.npy")
+    if not os.path.exists(xp):
+        return None
+    x, y = np.load(xp), np.load(os.path.join(data_dir, "test_y.npy"))
+    return DataLoader(FeatureDataset(x, y), batch_size=batch_size, shuffle=False)
